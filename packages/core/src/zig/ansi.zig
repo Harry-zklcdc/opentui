@@ -32,6 +32,14 @@ pub const ANSI = struct {
         writer.print("\x1b[48;2;{d};{d};{d}m", .{ r, g, b }) catch return AnsiError.WriteFailed;
     }
 
+    pub fn fgColor256Output(writer: anytype, index: u8) AnsiError!void {
+        writer.print("\x1b[38;5;{d}m", .{index}) catch return AnsiError.WriteFailed;
+    }
+
+    pub fn bgColor256Output(writer: anytype, index: u8) AnsiError!void {
+        writer.print("\x1b[48;5;{d}m", .{index}) catch return AnsiError.WriteFailed;
+    }
+
     // Text attribute constants
     pub const bold = "\x1b[1m";
     pub const dim = "\x1b[2m";

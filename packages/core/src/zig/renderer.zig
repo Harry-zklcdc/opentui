@@ -33,6 +33,20 @@ fn rgbaComponentToU8(component: f32) u8 {
     return @intFromFloat(@round(clamped * 255.0));
 }
 
+fn rgbToAnsi256(r: u8, g: u8, b: u8) u8 {
+    if (r == g and g == b) {
+        if (r < 8) return 16;
+        if (r > 248) return 231;
+        return @intCast(232 + ((@as(u16, r) - 8) / 10));
+    }
+
+    const r6: u16 = (@as(u16, r) * 5 + 127) / 255;
+    const g6: u16 = (@as(u16, g) * 5 + 127) / 255;
+    const b6: u16 = (@as(u16, b) * 5 + 127) / 255;
+
+    return @intCast(16 + (36 * r6) + (6 * g6) + b6);
+}
+
 pub const DebugOverlayCorner = enum {
     topLeft,
     topRight,
@@ -660,6 +674,9 @@ pub const CliRenderer = struct {
                     }
                 }
 
+                const capabilities = self.terminal.getCapabilities();
+                const useTrueColor = capabilities.rgb;
+
                 if (!sameAttributes or runStart == -1) {
                     if (runLength > 0) {
                         writer.writeAll(ansi.ANSI.reset) catch {};
@@ -683,13 +700,23 @@ pub const CliRenderer = struct {
                     const bgB = rgbaComponentToU8(cell.bg[2]);
                     const bgA = cell.bg[3];
 
-                    ansi.ANSI.fgColorOutput(writer, fgR, fgG, fgB) catch {};
+                    if (useTrueColor) {
+                        ansi.ANSI.fgColorOutput(writer, fgR, fgG, fgB) catch {};
+                    } else {
+                        const fgIndex = rgbToAnsi256(fgR, fgG, fgB);
+                        ansi.ANSI.fgColor256Output(writer, fgIndex) catch {};
+                    }
 
                     // If alpha is 0 (transparent), use terminal default background instead of black
                     if (bgA < 0.001) {
                         writer.writeAll("\x1b[49m") catch {};
                     } else {
-                        ansi.ANSI.bgColorOutput(writer, bgR, bgG, bgB) catch {};
+                        if (useTrueColor) {
+                            ansi.ANSI.bgColorOutput(writer, bgR, bgG, bgB) catch {};
+                        } else {
+                            const bgIndex = rgbToAnsi256(bgR, bgG, bgB);
+                            ansi.ANSI.bgColor256Output(writer, bgIndex) catch {};
+                        }
                     }
 
                     ansi.TextAttributes.applyAttributesOutputWriter(writer, cell.attributes) catch {};
@@ -703,7 +730,6 @@ pub const CliRenderer = struct {
                         std.debug.panic("Fatal: no grapheme bytes in pool for gid {d}: {}", .{ gid, err });
                     };
                     if (bytes.len > 0) {
-                        const capabilities = self.terminal.getCapabilities();
                         const graphemeWidth = gp.charRightExtent(cell.char) + 1;
                         if (capabilities.explicit_width) {
                             ansi.ANSI.explicitWidthOutput(writer, graphemeWidth, bytes) catch {};
