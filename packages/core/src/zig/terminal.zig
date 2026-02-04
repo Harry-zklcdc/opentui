@@ -300,15 +300,18 @@ fn checkEnvironmentOverrides(self: *Terminal) void {
             self.in_tmux = true;
             self.caps.unicode = .wcwidth;
             self.caps.explicit_cursor_positioning = true;
+            self.skip_explicit_width_query = true;
         } else if (env_map.get("TERM")) |term| {
             if (std.mem.startsWith(u8, term, "tmux")) {
                 self.in_tmux = true;
                 self.caps.unicode = .wcwidth;
                 self.caps.explicit_cursor_positioning = true;
+                self.skip_explicit_width_query = true;
             } else if (std.mem.startsWith(u8, term, "screen")) {
                 self.skip_graphics_query = true;
                 self.caps.unicode = .wcwidth;
                 self.caps.explicit_cursor_positioning = true;
+                self.skip_explicit_width_query = true;
             }
             if (std.mem.indexOf(u8, term, "alacritty") != null) {
                 self.caps.explicit_cursor_positioning = true;
@@ -320,8 +323,11 @@ fn checkEnvironmentOverrides(self: *Terminal) void {
         self.skip_graphics_query = true;
     }
 
-    if (!self.term_info.from_xtversion) {
-        if (env_map.get("TERM_PROGRAM")) |prog| {
+    var term_program: ?[]const u8 = null;
+    var skip_colorterm_rgb = false;
+    if (env_map.get("TERM_PROGRAM")) |prog| {
+        term_program = prog;
+        if (!self.term_info.from_xtversion) {
             const copy_len = @min(prog.len, self.term_info.name.len);
             @memcpy(self.term_info.name[0..copy_len], prog[0..copy_len]);
             self.term_info.name_len = copy_len;
@@ -332,19 +338,25 @@ fn checkEnvironmentOverrides(self: *Terminal) void {
                 self.term_info.version_len = ver_len;
             }
         }
+    }
 
-        if (env_map.get("TERM_PROGRAM")) |prog| {
-            if (std.mem.eql(u8, prog, "vscode")) {
-                self.caps.kitty_keyboard = false;
-                self.caps.kitty_graphics = false;
-                self.caps.unicode = .unicode;
-            } else if (std.mem.eql(u8, prog, "Apple_Terminal")) {
-                self.caps.unicode = .wcwidth;
-            } else if (std.mem.eql(u8, prog, "Alacritty")) {
-                self.caps.explicit_cursor_positioning = true;
-            }
+    const effective_term_program = if (self.term_info.from_xtversion) self.getTerminalName() else term_program;
+    if (effective_term_program) |prog| {
+        if (std.mem.eql(u8, prog, "vscode")) {
+            self.caps.kitty_keyboard = false;
+            self.caps.kitty_graphics = false;
+            self.caps.unicode = .unicode;
+        } else if (std.mem.eql(u8, prog, "Apple_Terminal")) {
+            self.caps.unicode = .wcwidth;
+            self.skip_explicit_width_query = true;
+            self.caps.rgb = false;
+            skip_colorterm_rgb = true;
+        } else if (std.mem.eql(u8, prog, "Alacritty")) {
+            self.caps.explicit_cursor_positioning = true;
         }
+    }
 
+    if (!self.term_info.from_xtversion) {
         if (env_map.get("ALACRITTY_SOCKET") != null or env_map.get("ALACRITTY_LOG") != null) {
             self.caps.explicit_cursor_positioning = true;
             if (self.term_info.name_len == 0) {
@@ -355,11 +367,13 @@ fn checkEnvironmentOverrides(self: *Terminal) void {
         }
     }
 
-    if (env_map.get("COLORTERM")) |colorterm| {
-        if (std.mem.eql(u8, colorterm, "truecolor") or
-            std.mem.eql(u8, colorterm, "24bit"))
-        {
-            self.caps.rgb = true;
+    if (!skip_colorterm_rgb) {
+        if (env_map.get("COLORTERM")) |colorterm| {
+            if (std.mem.eql(u8, colorterm, "truecolor") or
+                std.mem.eql(u8, colorterm, "24bit"))
+            {
+                self.caps.rgb = true;
+            }
         }
     }
 
@@ -502,7 +516,9 @@ pub fn processCapabilityResponse(self: *Terminal, response: []const u8) void {
         self.caps.sgr_pixels = true;
     }
     if (std.mem.indexOf(u8, response, "2027;2$y")) |_| {
-        self.caps.unicode = .unicode;
+        if (!std.mem.eql(u8, self.getTerminalName(), "Apple_Terminal")) {
+            self.caps.unicode = .unicode;
+        }
     }
     if (std.mem.indexOf(u8, response, "2031;2$y")) |_| {
         self.caps.color_scheme_updates = true;
