@@ -36,7 +36,7 @@ fn rgbaComponentToU8(component: f32) u8 {
 fn rgbToAnsi256(r: u8, g: u8, b: u8) u8 {
     if (r == g and g == b) {
         if (r < 8) return 16;
-        if (r > 248) return 231;
+        if (r >= 248) return 231;
         return @intCast(232 + ((@as(u16, r) - 8) / 10));
     }
 
